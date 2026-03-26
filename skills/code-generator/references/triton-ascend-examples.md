@@ -105,6 +105,8 @@ class ModelNew(torch.nn.Module):
     def forward(self, x):
         # 第一个 kernel
         intermediate = torch.empty_like(x)
+        n_elements = x.numel()
+        grid = (triton.cdiv(n_elements, BLOCK_SIZE),)
         kernel1[grid](x, intermediate, ...)
         
         # 第二个 kernel

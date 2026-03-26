@@ -637,7 +637,8 @@ class ModelNew(torch.nn.Module):
             self.CUBE_CORE_NUM = 20
 
     def forward(self, x):
-        grid = (self.VEC_CORE_NUM,)
+        n_elements = x.numel()
+        grid = (triton.cdiv(n_elements, BLOCK_SIZE),)
         kernel[grid](...)
 ```
 
@@ -650,7 +651,9 @@ class ModelNew(torch.nn.Module):
 class ModelNew(torch.nn.Module):
     def forward(self, input_tensor):
         core_num = torch_npu.npu.npu_config.get_device_limit(0).get("vector_core_num", 48)
-        grid = (core_num,)
+        n_elements = input_tensor.numel()
+        grid = (triton.cdiv(n_elements, BLOCK_SIZE),)
+        kernel[grid](...)
         ...
 
 # 正确：正确：在 __init__ 中调用，只执行一次
@@ -660,6 +663,8 @@ class ModelNew(torch.nn.Module):
         self.VEC_CORE_NUM = torch_npu.npu.npu_config.get_device_limit(0).get("vector_core_num", 48)
     
     def forward(self, input_tensor):
+        n_elements = input_tensor.numel()
+        grid = (triton.cdiv(n_elements, BLOCK_SIZE),)
         grid = (self.VEC_CORE_NUM,)
         ...
 ```
@@ -892,8 +897,9 @@ data = tl.load(ptr + idx, mask=mask, other=0.0)
 
 ---
 
-## 注意conv类卷积算子编写：
-torch module中的卷积算子生成会包含一个随机权重weight，为保证我们生成的triton实现也具有相同的结果，我们可以在triton的host侧代码中生成对应的weight，例如：
+## 7. conv类卷积算子编写约束：
+
+torch module中的conv类卷积算子生成会包含一个随机权重weight，为保证我们生成的triton实现也具有相同的结果，我们可以在triton的host侧代码中生成对应的weight，例如：
 ```python
 import torch
 import torch.nn as nn
@@ -907,7 +913,7 @@ def triton_host():
     args = ...
     weight = nn.conv(**args).weight.to(device)
 ```
-具体的参数和''nn''中调用的module要与torch保持一致，device与传入的backend保持一致（如"npu"），我会在调用triton之前固定相同的随机种子，所以在这里只需要正确地创建类的实例，并导出权重
+具体的参数和''nn''中调用的module要与torch保持一致，device与传入的backend保持一致（如"cuda", "npu"），我会在调用triton之前固定相同的随机种子，所以在这里只需要正确地创建类的实例，并导出权重
 
 ---
 
@@ -1036,6 +1042,8 @@ output = normalized * weight + bias
 class ModelNew(torch.nn.Module):
     def forward(self, x):
         intermediate = torch.empty_like(x)
+        n_elements = x.numel()
+        grid = (triton.cdiv(n_elements, BLOCK_SIZE),)
         kernel1[grid](x, intermediate, ...)
 
         output = torch.empty_like(x)
